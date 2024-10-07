@@ -1,0 +1,103 @@
+// Import the standard library
+#include "stdlib.fc"
+
+// Define a constant to represent one TON
+const int ONE_TON = 1000000000;
+
+// Define a cell to store stake information
+struct StakeInfo {
+    cell owner;         // Owner of the stake
+    int amount;         // Staked amount (in nanotons)
+    int timestamp;      // Timestamp of the stake (for reward calculation)
+};
+
+// Data storage structure
+struct Storage {
+    int totalStaked;                // Total amount staked in the contract
+    cell map;                       // Mapping of stakers (address -> StakeInfo)
+};
+
+// Initialize the contract with an empty storage
+() main() {
+    // Set initial storage (empty map and zero staked)
+    Storage initialStorage;
+    initialStorage.totalStaked = 0;
+    initialStorage.map = map_empty();
+    
+    // Set the contract's initial storage
+    return initialStorage;
+}
+
+// Function to stake TON coins
+(int, cell) stake(int stakedAmount, cell sender) impure {
+    // Get the current storage
+    Storage storage;
+    storage = get_data();
+
+    // Calculate reward if the sender has staked before
+    cell stakerInfo = map_get_opt(storage.map, sender);
+    int reward = 0;
+    if (stakerInfo) {
+        StakeInfo oldStake = stakerInfo;
+        reward = calculate_reward(oldStake.amount, oldStake.timestamp);
+    }
+
+    // Add the new stake
+    StakeInfo newStake;
+    newStake.owner = sender;
+    newStake.amount = stakedAmount;
+    newStake.timestamp = now();  // Store current block timestamp
+
+    // Update the storage
+    storage.totalStaked += stakedAmount;
+    storage.map = map_insert(storage.map, sender, newStake);
+
+    // Save the updated storage
+    set_data(storage);
+
+    // Return the staked amount and reward (for display purposes)
+    return (stakedAmount, reward);
+}
+
+// Function to calculate reward based on staking time and amount
+int calculate_reward(int amount, int stakeTime) impure {
+    int duration = now() - stakeTime; // Time staked
+    return amount * duration / 10000; // Simple reward formula
+}
+
+// Function to withdraw staked amount and rewards
+(int, int) withdraw(cell sender) impure {
+    // Get the current storage
+    Storage storage;
+    storage = get_data();
+
+    // Retrieve the staker info
+    cell stakerInfo = map_get_opt(storage.map, sender);
+    if (!stakerInfo) {
+        return (-1, 0); // If the staker has no funds, return an error
+    }
+
+    // Calculate reward
+    StakeInfo stake = stakerInfo;
+    int reward = calculate_reward(stake.amount, stake.timestamp);
+
+    // Remove the staked amount from the total staked
+    storage.totalStaked -= stake.amount;
+
+    // Remove the staker from the map
+    storage.map = map_delete(storage.map, sender);
+
+    // Save the updated storage
+    set_data(storage);
+
+    // Transfer the staked amount + reward back to the staker
+    send_transfer(sender, stake.amount + reward, 0);
+
+    // Return the withdrawn amount and reward
+    return (stake.amount, reward);
+}
+
+// Utility function to transfer TON coins to a user
+() send_transfer(cell to, int amount, int flags) impure {
+    send_raw_message(to, amount, flags);
+}
